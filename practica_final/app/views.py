@@ -1,0 +1,745 @@
+from django.shortcuts import render
+from django.http import HttpResponse,HttpResponseNotFound, HttpResponseRedirect
+from models import Activitie, UsersPage, Publication
+from BeautifulSoup import BeautifulSoup
+from datetime import datetime,timedelta
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib import auth
+from django.template.loader import get_template
+from django.template import Context
+import urllib2
+import htmllib
+
+# Create your views here.
+
+fecha_de_publicacion = datetime.now()
+
+################################### PAGE / #####################################
+def splitName(contenido):
+    name = contenido.split("<br>")[1].split('<atributo nombre="TITULO">')[1].split('</atributo>')[0]
+    return name
+    
+def splitPrice(contenido):
+    if contenido.split("<br>")[2] == ('<atributo nombre="GRATUITO">1</atributo>'):
+        price = contenido.split("<br>")[2].split('<atributo nombre="GRATUITO">')[1].split('</atributo>')[0]
+        price = "gratuito"
+    elif contenido.split("<br>")[2] == ('<atributo nombre="GRATUITO">0</atributo>'):
+        price = contenido.split("<br>")
+        auxPr = ""
+        i = 0
+        for pr in price:
+            if pr.find('<atributo nombre="PRECIO">') != -1:
+                auxPr = contenido.split("<br>")[i].split('<atributo nombre="PRECIO">')[1].split('</atributo>')[0]
+                price = auxPr
+                break
+            i += 1
+        if auxPr == "":
+            price = "null"
+    else:
+        try:
+            price = contenido.split("<br>")[2].split('<atributo nombre="PRECIO">')[1].split('</atributo>')[0]
+            price = price.split('<![CDATA[')[1].split(']')[0]
+        except:
+            price = contenido.split("<br>")[2].split('<atributo nombre="PRECIO">')[1].split('</atributo>')[0]
+    return price
+
+def splitDate(contenido):
+    date = contenido.split("<br>")
+    i = 0
+    for nombre in date:
+        if nombre.find('<atributo nombre="FECHA-EVENTO">') != -1:
+            break
+        i += 1
+    date = contenido.split("<br>")[i].split('<atributo nombre="FECHA-EVENTO">')[1].split('</atributo>')[0]
+    date = date.split(' ')[0]
+    return date
+
+def splitStart(contenido):
+    start = contenido.split("<br>")
+    i = 0
+    for hour in start:
+        if hour.find('<atributo nombre="HORA-EVENTO">') != -1:
+            break
+        i += 1
+    start = contenido.split("<br>")[i].split('<atributo nombre="HORA-EVENTO">')[1].split('</atributo>')[0]
+    return start
+
+def splitType(contenido):
+    typ = contenido.split("<br>")
+    auxT = typ
+    i = 0
+    for tp in typ:
+        if tp.find('<atributo nombre="TIPO">') != -1:
+            typ = contenido.split("<br>")[i].split('<atributo nombre="TIPO">')[1].split('</atributo>')[0]
+            typ = typ.split("/")[3]
+            break
+        i += 1
+    if auxT == typ:
+        typ = "Evento"
+    return typ
+
+def splitTimeToLong(contenido):
+    start = contenido.find('<atributo nombre="FECHA-EVENTO">')
+    inicio = contenido[start:]
+    inicio = inicio.split('</atributo>')[0]
+    inicio = inicio.split('<atributo nombre="FECHA-EVENTO">')[1].split('.')[0]
+    end = contenido.find('<atributo nombre="FECHA-FIN-EVENTO">')
+    fin = contenido[end:]
+    fin = fin.split('</atributo>')[0]
+    fin = fin.split('<atributo nombre="FECHA-FIN-EVENTO">')[1].split('.')[0]
+    date_object_start = datetime.strptime(inicio, '%Y-%m-%d %H:%M:%S')
+    date_object_end = datetime.strptime(fin, "%Y-%m-%d %H:%M:%S")
+    timeToLong = date_object_end - date_object_start
+    return timeToLong
+
+def Long(timeToLong):
+    reference = timedelta(hours=5)
+    if timeToLong >= reference:
+        return True
+    return False
+
+def splitUrl(contenido):
+    url = contenido.split("<br>")
+    i = 0
+    for urls in url:
+        if urls.find('<atributo nombre="CONTENT-URL">') != -1:
+            break
+        i += 1
+    url = contenido.split("<br>")[i].split('<atributo nombre="CONTENT-URL">')[1].split('</atributo>')[0]
+    return url
+
+def equals(resource):
+    try:
+        Activitie.objects.get(name=resource)
+        return True
+    except Activitie.DoesNotExist:
+        return False
+
+def saveEntrie(nam,pric,dat,startHou,ty,timeToLon,Lon,Ur):
+    if equals(nam) != True:
+        act = Activitie(name = str(nam), \
+                        price = str(pric), \
+                        date = str(dat), \
+                        startHour = str(startHou), \
+                        typ = str(ty),\
+                        timeToLong = str(timeToLon), \
+                        Long = str(Lon), \
+                        Url = str(Ur))
+        act.save()    
+
+
+def parse():
+    urlXml = 'http://datos.madrid.es/egob/catalogo/206974-0-agenda-eventos-culturales-100.xml'
+    xml_doc = urllib2.urlopen(urlXml)
+    xml_code = BeautifulSoup(xml_doc)
+    response = ""
+    for content in xml_code.findAll("contenido"):
+        contenido = ""
+        for news in content.findAll("atributo"):
+            contenido += str(news) + "<br>"
+        name = splitName(contenido)
+        price = splitPrice(contenido)
+        date = splitDate(contenido)
+        start = splitStart(contenido)
+        typ = splitType(contenido)
+        timeToLong = splitTimeToLong(contenido)
+        lng = Long(timeToLong) 
+        url = splitUrl(contenido)
+        print name
+        print price
+        print date
+        print start
+        print typ
+        print timeToLong
+        print lng
+        print url
+        saveEntrie(name,price,date,start,typ,timeToLong,lng,url)
+        response += contenido + "<br><hr><br>"
+    return response
+
+def giveTenDateAct():
+    act = Activitie.objects.order_by('-date')
+    activities = "\n"
+    for acts in range(0,10):
+        activities += "Actividad: " + act[acts].name + ", Precio: " + \
+                    act[acts].price + ",<br> Fecha: " + act[acts].date + \
+                    ", Hora inicio: " + act[acts].startHour + \
+                    ", Url: " + "<a href=" + act[acts].Url + ">" + \
+                    "mas informacion</a>" + "<br><br>"
+    return activities
+
+def getActUser(acts):
+    lt = "<ul>"
+    for ls in acts:
+        lt += '<li type="circle">' + ls.name +" "+ ls.price +" "+\
+        ls.startHour +" "+ ls.timeToLong + "</li>"
+    return lt + "</ul>"
+
+def givePagesUsers():
+    response = "<h2>paginas de usuarios</h2>"
+    pages = UsersPage.objects.all()
+    for page in pages:
+        response += "<a href=" + str(page.user) + ">" + str(page.user) +"</a>: <ul> " + \
+        '<li type="circle">Nombre de la pagina: ' + str(page.name) + "</li>" +\
+        '<li type="circle">Lista de actividades:<br>' + getActUser(page.activities.all()) +"</li>" +\
+        "</ul>"
+    return response
+
+def index(request):
+    response = ""
+    if Activitie.objects.count() <= 0:
+        parse()
+        print "wiselwisel"
+    response += giveTenDateAct()
+    response += givePagesUsers()
+
+    title = "Pagina principal"
+    cl = "Actividades y paginas disponibles"
+    descri = "muestra de las 10 primeras actividades, junto con las paginas de usuarios"
+
+    return inicio(title,descri,cl,response,request) 
+
+################################# PAGE /todas ###################################
+
+def addButton(ident):
+    button = "<form action='/add' method='POST'>"
+    button += "<button name='Identificador' value='"+ str(ident) +"' id='Identificador' class='add'>Add</button>"
+    button += "</form>"
+    return button
+
+def moreOneButton(ident):
+    button = "<form action='/moreOne' method='POST'>"
+    button += "<button name='Identificador' value='"+ str(ident) +"' id='Identificador' class='m1'>+1</button>"
+    button += "</form>"
+    return button
+
+def getActivities(request,acts):
+    if request.user.is_authenticated():
+        print request.user
+        lt = "<ul>"
+        for ls in acts:
+			lt += '<li type="circle">' +"<a href='actividad/" + str(ls.id) + "'>" + ls.name + \
+			"</a> " + ls.price +" <br>"+ ls.date +" "+ ls.startHour +" Duracion:"+ \
+			ls.timeToLong + addButton(ls.id) + moreOneButton(ls.id) + "</li>"
+    else:
+        lt = "<ul>"
+        for ls in acts:
+            lt += '<li type="circle">' +"<a href='actividad/" + str(ls.id) + "'>" + ls.name +\
+            " "+ ls.price +" "+ ls.date +" "+\
+            ls.startHour +" "+ ls.timeToLong + "</li>"
+    return lt + "</ul>"
+
+def filterForm():
+    form = "<form action='' method='POST'>\n"
+    form += "Filter: <select name='filter method'" 
+    form += "<option selected value='name'> Name </option>"
+    form += "<option value='name'> Name </option>"
+    form += "<option value='startHour'> Hour </option>"
+    form += "<option value='-date'> Date </option>"
+    form += "<option value='price'> Price </option>" 
+    form += "</optgroup>" 
+    form += "</select>"
+    form += "<br>\n"
+    form += "<input type='submit' value='enviar'>\n"
+    form += "</form>\n"
+    return form
+
+@csrf_exempt
+def allActivities(request):
+    if request.method == "POST":
+        value = request.POST['filter method']
+        print value 
+        act = Activitie.objects.order_by(value)
+        response = filterForm() + getActivities(request,act)
+    else:
+        act = Activitie.objects.all()
+        response = filterForm() + getActivities(request,act)
+
+    title = "Todas las actividades"
+    cl = "Actividades disponibles en la cominidad de madrid"
+    descri = "muestra las actividades disponibles en la comunidad de madrid"
+
+    return render(title,descri,cl,response,request) 
+
+
+############################ PAGE /Actividad/id ################################
+
+def decodeToOpenUrl(url):
+    u = htmllib.HTMLParser(None)
+    u.save_bgn()
+    u.feed(url)
+    url = u.save_end()
+    return url
+
+
+def searchP(url):
+    urlInfor = decodeToOpenUrl(url)
+    infor = urllib2.urlopen(urlInfor)
+    infor = infor.read()
+    s = infor.find('<div class="parrafo">')
+    if s == -1:
+        boolean = False
+        response = "<a href=" + str(url) + ">" + "informacion" + "</a> <br>"
+    else:
+        boolean = True
+        e = infor.find('</div>',s)
+        parrafo = infor[s:e]
+        parrafo = parrafo.split('<div class="parrafo">')[1]
+        response = parrafo + "<br>"
+        response += "<a href=" + str(url) + ">" + "toda la informacion" + "</a> <br>"
+        response = unicode(response, 'utf-8')
+    return response,boolean
+
+def activity(request,resource):
+    response = ""
+    try:
+        act = Activitie.objects.get(id=resource)
+        response += act.name +" "+ act.price +" "+ act.date +" "+\
+        act.startHour +" "+ act.timeToLong + "<br><br>"
+        title = act.name
+        descri = ""
+        cl = "Actividad"
+        
+        p,bl = searchP(act.Url)
+        if bl == True:
+           response += p
+           return render(title,descri,cl,response,request)
+
+        urlAdc = decodeToOpenUrl(act.Url)
+        urlA = urllib2.urlopen(urlAdc)
+        html = urlA.read()
+        start = html.find('<a class="punteado" href="')
+        
+        if start != -1:
+            end = html.find('">',start)
+            parrafo = html[start:end]
+            urlInfor = parrafo.split('href="')[1]
+        else:
+            urlInfor = act.Url
+
+        if not urlInfor.startswith("http://www.madrid.es"):
+            urlInfor = "http://www.madrid.es" + urlInfor
+
+        urlInfor = decodeToOpenUrl(urlInfor)
+        infor = urllib2.urlopen(urlInfor)
+        infor = infor.read()
+        s = infor.find('<div class="parrafo">')
+        if s == -1:
+            response += "<a href=" + urlInfor + ">" + "informacion" + "</a> <br>"
+            return render(title,descri,cl,response,request)       
+        e = infor.find('</div>',s)
+        parrafo = infor[s:e]
+        response += parrafo + "<br>"
+        response += "<a href=" + act.Url + ">" + "toda la informacion" + "</a> <br>"
+        
+        return render(title,descri,cl,response,request) 
+    except Activitie.DoesNotExist:
+        return HttpResponseNotFound('<h1>Resource not found</h1>')
+
+################################# PAGE /usuario ##################################
+
+def formPage(user):
+    form = "<form action='/preferences' method='POST' id='userPage'>"
+    form += "Name Page: <input type='text' name='name' value='pagina de " + str(user) + "' id='name'><br>"
+    form += "Background-color: <input type='text' name='background' value='' id='background'><br>"
+    form += "Text-color: <input type='text' name='tx_c' value='' id='tx_c'><br>" 
+    form += "<input type='submit' value='enviar'>"
+    form += "</form><br>"
+    return form
+
+def savePagAct(userName,namePag,backg,txc):
+    try:
+        page = UsersPage.objects.get(user = userName)
+        if namePag != "pagina de " + str(userName):
+            page.name = namePag
+        if backg != "":
+            page.background = backg
+        if txc != "":
+            page.text = txc
+        page.save()
+    except UsersPage.DoesNotExist:
+        page = UsersPage(user = userName, name = namePag)
+        page.save()
+
+def nextButton(user,lsid):
+    button = "<form action='/" + user + "'method='POST'>"
+    button += "<button name='Identificador' value='"+ str(lsid) +"' id='Identificador' class='m1'>></button>"
+    button += "</form>"
+    return button
+
+def getUsersPage(name):
+    try:
+        page = UsersPage.objects.get(user=name)
+        acts = page.activities.all()
+        if acts.count() > 10:
+            acts = acts[:10]
+        imp = ""
+        for act in acts:
+            imp += "<a href=" + "actividad/" + str(act.id) + ">" + act.name +\
+             "</a>  Puntuacion: " + str(act.point)  + "<br>"
+            lstid = act.id
+            try:
+                pub = Publication.objects.get(user = page, activities = act)
+                imp += "Fecha de publicacion: "+ str(pub.date).split('.')[0] + "<br>"
+            except:
+                print "sucede cuando se mete a con admin una actividad"
+            
+        if acts.count() >= 10:
+            imp += nextButton(name,lstid)
+        return imp + "<br>"
+    except UsersPage.DoesNotExist:
+        return "User Page Not Found"
+
+def giveNextTen(name,first):
+    page = UsersPage.objects.get(user=name)
+    acts = page.activities.all()
+    imp = ""
+    i = 0
+    for act in acts:
+        print str(act.id)
+        if str(act.id) == str(first):
+            break
+        i += 1
+    i += 1
+    acts = acts[i:i+10]
+    i = 0
+    for act in acts:
+        print "wisel"
+        imp += "<a href=" + "actividad/" + str(act.id) + ">" + act.name +\
+            "</a>  Puntuacion: " + str(act.point)  + "<br>"
+        lstid = act.id
+        i += 1
+        try:
+            pub = Publication.objects.get(user = page, activities = act)
+            imp += "Fecha de publicacion: "+ str(pub.date).split('.')[0] + "<br>"
+        except:
+            print "sucede cuando se mete a con admin una actividad"
+            
+    if i >= 10:
+        imp += nextButton(name,lstid)
+    return imp + "<br>"
+    
+
+@csrf_exempt
+def users(request,resource):
+    if request.method == "GET":
+        response = ""
+        if request.user.is_authenticated():
+            if str(request.user) == str(resource):
+                response += formPage(resource)
+            response += getUsersPage(resource)
+            logged = "<br><br>Logged in as " + resource +\
+                 ". <a href='http://127.0.0.1:8000/admin/logout/'>Logout</a><br>"
+            response += logged
+            title = " Pagina de " + str(resource)
+            try:
+                page = UsersPage.objects.get(user = resource)
+                cl = " " + page.name
+            except:
+                cl = "Pagina de " + str(resource)
+            descri = "muestra la pagina de " + str(resource)
+        else:
+            response = getUsersPage(resource)
+            title = " Pagina de " + str(resource)
+            cl = "Pagina de " + str(resource)
+            descri = "muestra la pagina de " + str(resource)
+
+        return render(title,descri,cl,response,request)   
+    else:
+        lastid = request.POST.get("Identificador", '')
+        response = ""
+        if request.user.is_authenticated():
+            if str(request.user) == str(resource):
+                response += formPage(resource)
+            response += giveNextTen(resource,lastid)
+            logged = "<br><br>Logged in as " + resource +\
+                 ". <a href='http://127.0.0.1:8000/admin/logout/'>Logout</a><br>"
+            response += logged
+            title = " Pagina de " + str(resource)
+            try:
+                page = UsersPage.objects.get(user = resource)
+                cl = " " + page.name
+            except:
+                cl = "Pagina de " + str(resource)
+            descri = "muestra la pagina de " + str(resource)
+            return render(title,descri,cl,response,request) 
+        else:
+            response += giveNextTen(resource,lastid)
+
+        title = " Pagina de " + str(resource)
+        cl = "Pagina de " + str(resource)
+        descri = "muestra la pagina de " + str(resource)
+
+        return render(title,descri,cl,response,request) 
+
+######################### PAGE /savePreferences ################################
+@csrf_exempt       
+def savePreferences(request):
+    username = request.user
+    name = request.POST.get("name", '')
+    backg = request.POST.get("background", '')
+    txc = request.POST.get("tx_c",'')
+    savePagAct(username,name,backg,txc)
+    return HttpResponseRedirect("/" + str(username))
+
+################################ PAGE /login ###################################
+def loginForm():
+    form = "<form action='' method='POST'>"
+    form += "Username: <input type='text' name='username' value='' id='username'><br>"
+    form += "Password : <input type='password' name='password' value='' id='password'><br>"
+    form += "<input type='submit' value='enviar'>"
+    form += "</form>"
+    return form
+
+@csrf_exempt
+def login(request):
+    response = ""
+    if request.method == "GET":
+        response = loginForm()
+        title = "Login"
+        return log(title,title,response)
+    else:
+        username = request.POST.get("username", '')
+        password = request.POST.get("password", '')
+        user = auth.authenticate(username=username, password=password)
+        if user is not None:
+            auth.login(request,user)
+            return HttpResponseRedirect('/' + str(user))
+        else:
+            response = "User not found"
+    return HttpResponseNotFound(response)
+
+############################### PAGE /Usuario/RSS ##############################
+
+def getLink(resource):
+    return "/" + resource
+
+def getTitle(resource):
+    try:
+        title = UsersPage.objects.get(user=resource)
+    except:
+        return None
+    return str(title.name)
+
+def getPbDate(resource):
+    return "fecha de wisel"
+
+def getDescrip(resource):
+    page = UsersPage.objects.get(user=resource)
+    acts = page.activities.all()
+    description = "Contiene las actividades con id: "
+    for act in acts:
+        description += str(act.id) + ", " 
+    return description
+
+def getItemsAct(resource):
+    page = UsersPage.objects.get(user=resource)
+    acts = page.activities.all()
+    item = ""
+    for act in acts:
+        item += '<item>'
+        item += '<title>'+ str(act.id) + '</title>'
+        item += '<link>' + "actividad/" + str(act.id) + '</link>'
+        item += '<pubDate>' +"wisel..." + '</pubDate>'
+        item += '<description>' + act.name + '</description>'
+        item += '</item>'
+    return item
+
+#### SACAR A PLANTILLA
+def RSS(request,resource):
+    response = '<?xml version="1.0" encoding="UTF-8"?>'
+    response += '<rss version="2.0">'
+    response += '<channel>'
+    title = getTitle(resource)
+    if title == None:
+        return HttpResponseNotFound('<h1>Resource Not Found</h1>')
+    response += '<title>'+ getTitle(resource) + '</title>'
+    response += '<link>'+ getLink(resource) + '</link>'
+    response += '<description>' + getDescrip(resource) + '</description>'
+    response += '<pubDate>' + getPbDate(resource) + '</pubDate>'
+    response += getItemsAct(resource)
+    response += '</channel></rss>'
+    return HttpResponse(response, content_type='rss')
+
+################################## PAGE /RSS ###################################
+
+
+def getActs():
+    acts = Activitie.objects.all()
+    item = ""
+    for act in acts:  
+        item += '<item>'
+        item += '<title>'+ str(act.id) + '</title>'
+        item += '<link>' + "actividad/" + str(act.id) + '</link>'
+        item += '<pubDate>' +"wisel..." + '</pubDate>'
+        item += '<description>' + act.name + '</description>'
+        item += '</item>'
+    return item
+
+def getUsers():
+    users = UsersPage.objects.all()
+    item = ""
+    for usr in users:
+        nam = str(usr.user)
+        print nam 
+        item += '<item>'
+        item += '<title>'+ nam + '</title>'
+        item += '<link>/'+ nam + '</link>'
+        item += '<description>' + getDescrip(nam)+'</description>'
+        item += '<pubDate>' + getPbDate(nam) + '</pubDate>'
+        item += getItemsAct(nam)
+        item += '</item>'
+    return item
+
+def RSSMain(request):
+    response = '<?xml version="1.0" encoding="UTF-8"?>'
+    response += '<rss version="2.0">'
+    response += '<channel>'
+    title = "Pagina principal"
+    response += '<title> Pagina principal </title>'
+    response += '<link> /RSS </link>'
+    response += '<description> muestra de las actividades principales y\
+    las paginas de usuario </description>'
+    response += '<pubDate>' + str(datetime.now()).split('.')[0] + '</pubDate>'
+    response += getActs()
+    response += getUsers()
+    response += '</channel></rss>'
+    return HttpResponse(response, content_type='rss')
+
+
+################################# PAGE /Ayuda ##################################
+def formRes(request):
+    if request.user.is_authenticated():
+        form = "<br><br>Logged in as " + str(request.user) +\
+                 ". <a href='http://127.0.0.1:8000/admin/logout/'>Logout</a><br>"
+    else:
+        form = "<form action='/login' method='POST'>"
+        form += "Username: <input type='text' name='username' value='' id='username'><br>"
+        form += "Password : <input type='password' name='password' value='' id='password'><br>"
+        form += "<input type='submit' value='enviar'>"
+        form += "</form>"
+    return form
+
+def help(request):
+    title = "Pagina con el funcionamiento basico de la practica"
+    response = "recurso / : muestra las 10 primeras actividades<br>"
+    response += "recurso /actividad/id : muestra la actividad correspondiente al id<br>"
+    response += "recurso /admin :muesrta la interfaz del admin por defecto de django<br>"
+    response += "recurso /ayuda :muestra esta pagina<br>"
+    response += "recurso /todas : muestra un listado de las actividades, con la posibilidad de elegir como ordenarlas <br>"
+    response += "recurso /usuario :muestra la pagina del usuario en cuestion junto con la lista de actividades elegidas<br>"
+    response += "recurso /usuario/RSS :muestra el RSS corespondiente a un usuario<br>"   
+    response += "recurso /usuarios :muesrta un listado de los usuarios disponibles<br>"
+    cl = "urls disponibles"
+    descri = "guia sobre las urls disponibles en la pagina web"
+
+    return render(title,descri,cl,response,request)    
+
+################################### PAGE /Add ##################################
+def exitPub(user,activity):
+    try:
+        act = Publication.objects.get(activity)
+        usr = Publication.objects.get(user)
+        return True
+    except:
+        return False
+
+@csrf_exempt
+def addActivity(request):
+    activity = request.POST.get("Identificador", '')
+    try:
+        page = UsersPage.objects.get(user = str(request.user))
+    except UsersPage.DoesNotExist:
+        page = UsersPage(user = str(request.user), name = "pagina de " + str(request.user))
+        page.save()
+    cts = Activitie.objects.get(id=activity)
+    page.activities.add(cts)
+    if not exitPub(str(request.user),activity):
+        usr = UsersPage.objects.get(user = str(request.user))
+        act = Activitie.objects.get(id=activity)
+        dat = datetime.now()
+        pub = Publication(date = dat,user = usr, activities = act)
+        pub.save()
+    return HttpResponseRedirect("/todas")
+
+################################# PAGE /update #################################
+def up(request):
+    parse()
+    global fecha_de_publicacion 
+    fecha_de_publicacion = datetime.now()
+    return HttpResponseRedirect("/")
+
+################################ PAGE /moreOne #################################
+@csrf_exempt
+def moreOne(request):
+    activity = request.POST.get("Identificador", '')
+    try:
+        page = UsersPage.objects.get(user = str(request.user))
+    except UsersPage.DoesNotExist:
+        page = UsersPage(user = str(request.user), name = "pagina de " + str(request.user))
+        page.save()
+    act = Activitie.objects.get(id=activity)
+    act.point = act.point + 1
+    act.save()
+    return HttpResponseRedirect("/todas")
+
+############################## PAGE /usuarios ##################################
+def usuarios(request):
+    usrs = UsersPage.objects.all()
+    response = givePagesUsers()
+    title = "Pagina de usuarios"
+    descri = "Muestra los usuarios con sus actividades correspondientes"
+    cl = ""
+    return render(title,descri,cl,response,request) 
+
+
+################################# Render #######################################
+def getBk(request):
+    try:
+        color = UsersPage.objects.get(user=str(request.user))
+        color = color.background
+    except:
+        color = '#396b83'
+    return color
+
+def getTxc(request):
+    try:
+        color = UsersPage.objects.get(user=str(request.user))
+        color = color.text
+    except:
+        color = '#000000'
+    return color
+
+def render(title,descri,cl,response,request):
+    template = get_template('index.html')
+    form = formRes(request)
+    bk = getBk(request)
+    txc = getTxc(request)
+    global fecha_de_publicacion
+    f = fecha_de_publicacion
+    f = str(f).split('.')[0]
+    c = Context({'title': title,'description': descri,'class': cl,'text': response, 'record': form, 'backg': bk, 'cl': txc, 'fecha': f})
+    render = template.render(c)
+    return HttpResponse(render)
+
+def inicio(title,descri,cl,response,request):
+    template = get_template('inicio.html')
+    form = formRes(request)
+    bk = getBk(request)
+    txc = getTxc(request)
+    global fecha_de_publicacion
+    f = fecha_de_publicacion
+    f = str(f).split('.')[0]
+    c = Context({'title': title,'description': descri,'class': cl,'text': response, 'record': form, 'backg': bk, 'cl': txc, 'fecha': f})
+    render = template.render(c)
+    return HttpResponse(render)
+
+def log(title,cl,response):
+    template = get_template('login.html')
+    f = fecha_de_publicacion
+    f = str(f).split('.')[0]
+    c = Context({'title': title,'class': cl,'text': response,'fecha': f})
+    render = template.render(c)
+    return HttpResponse(render)
+
+
